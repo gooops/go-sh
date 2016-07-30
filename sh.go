@@ -42,17 +42,34 @@ import (
 type Dir string
 
 type Session struct {
-	inj     inject.Injector
-	alias   map[string][]string
-	cmds    []*exec.Cmd
-	dir     Dir
-	started bool
-	Env     map[string]string
-	Stdin   io.Reader
-	Stdout  io.Writer
-	Stderr  io.Writer
+	inj        inject.Injector
+	alias      map[string][]string
+	cmds       []*exec.Cmd
+	dir        Dir
+	started    bool
+	Env        map[string]string
+	Stdin      io.Reader
+	Stdout     io.Writer
+	Stderr     io.Writer
+	StdoutPipe chan string
+	StderrPipe chan string
+	OutPipe    bool
+	ErrPipe    bool
+
 	ShowCMD bool // enable for debug
 	timeout time.Duration
+}
+
+func (s *Session) SetStdoutPipe(outch chan string) *Session {
+	s.OutPipe = true
+	s.StdoutPipe = outch
+	return s
+}
+
+func (s *Session) SetStderrtPipe(errch chan string) *Session {
+	s.ErrPipe = true
+	s.StderrPipe = errch
+	return s
 }
 
 func (s *Session) writePrompt(args ...interface{}) {

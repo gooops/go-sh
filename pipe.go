@@ -1,6 +1,7 @@
 package sh
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"encoding/xml"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -61,6 +63,77 @@ func (s *Session) Start() (err error) {
 		if index == length-1 {
 			cmd.Stdout = s.Stdout
 			cmd.Stderr = s.Stderr
+			var stdout, stderr io.ReadCloser
+			_, _ = stdout, stderr
+			var wg sync.WaitGroup
+
+			if s.OutPipe {
+				cmd.Stdout = nil //reset cmd.Stdout ,否则会报 exec: Stdout already set
+				stdout, err = cmd.StdoutPipe()
+				// log.Println("stdout", err)
+			}
+
+			if s.ErrPipe {
+				cmd.Stderr = nil //reset cmd.Stdout ,否则会报 exec: Stdout already set
+				stderr, err = cmd.StderrPipe()
+				// log.Println("stderr", err)
+			}
+
+			// cmd.Stderr = s.Stderr
+			err = cmd.Start()
+			if err != nil {
+				if s.OutPipe {
+					close(s.StdoutPipe)
+				}
+				if s.ErrPipe {
+					close(s.StderrPipe)
+				}
+				return
+			}
+
+			if s.OutPipe {
+				wg.Add(1)
+				readerout := bufio.NewReader(stdout)
+				go func() {
+					//实时循环读取输出流中的一行内容
+					for {
+						line, _, err := readerout.ReadLine()
+						// log.Println(line)
+						s.StdoutPipe <- string(line)
+						if err != nil || io.EOF == err {
+							close(s.StdoutPipe)
+							break
+						}
+					}
+					wg.Done()
+				}()
+			}
+			if s.ErrPipe {
+				wg.Add(1)
+				readererr := bufio.NewReader(stderr)
+				go func() {
+					//实时循环读取输出流中的一行内容
+					for {
+						line, _, err := readererr.ReadLine()
+						// log.Println(line)
+						s.StderrPipe <- string(line)
+						if err != nil || io.EOF == err {
+							close(s.StderrPipe)
+							break
+						}
+					}
+					wg.Done()
+				}()
+			}
+			wg.Wait()
+		} else {
+			if s.ErrPipe || s.OutPipe {
+				return errors.New("Command output pipe does not support pipes!")
+			}
+			err = cmd.Start()
+			if err != nil {
+				return
+			}
 		}
 		err = cmd.Start()
 		if err != nil {
