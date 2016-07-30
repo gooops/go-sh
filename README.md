@@ -83,3 +83,79 @@ this project is based on <http://github.com/codegangsta/inject>. thanks for the 
 
 # the reason to use Go shell
 Sometimes we need to write shell scripts, but shell scripts are not good at working cross platform,  Go, on the other hand, is good at that. Is there a good way to use Go to write shell like scripts? Using go-sh we can do this now.
+
+#新增管道输出的使用示例
+
+使用示例
+
+package main
+
+import (
+    "log"
+    "sync"
+    "time"
+
+    "github.com/gooops/go-sh"
+)
+
+func main() {
+    outch := make(chan string)
+    errch := make(chan string)
+    _, _ = outch, errch
+    var wg sync.WaitGroup
+
+    // 获取标准错误输出
+    /*    wg.Add(1)
+        go func() {
+        L:
+            for {
+                select {
+                case line, ok := <-errch:
+                    if ok {
+                        time.Sleep(1 * time.Microsecond)
+                        log.Println("错误输出", line)
+                    } else {
+                        log.Println("错误结束")
+                        wg.Done()
+                        break L
+                    }
+
+                case <-time.After(time.Second * 10):
+                    log.Println("错误超时")
+                }
+            }
+        }()*/
+
+    // 获取标准输出
+    wg.Add(1)
+    go func() {
+    L:
+        for {
+            select {
+            case line, ok := <-outch:
+                if ok {
+                    time.Sleep(1 * time.Microsecond)
+                    log.Println("标准输出", line)
+                } else {
+                    log.Println("标准结束")
+                    wg.Done()
+                    break L
+                }
+            case <-time.After(time.Second * 10):
+                log.Println("标准超时")
+            }
+        }
+    }()
+    // 错误 2016/05/17 07:01:10 出错了 Command output pipe does not support pipes!
+    // err := sh.Command("echo", "hello").Command("wc", "-c").SetStderrtPipe(errch).SetStdoutPipe(outch).Run()
+    // err := sh.NewSession().SetDir("/root").Command("ansible-playbook", "test.yml", "-v").Command("grep", "async_test").SetStderrtPipe(errch).SetStdoutPipe(outch).Run()
+
+    // 正确
+    // err := sh.NewSession().SetDir("/root").Command("ansible-playbook", "test.yml", "-v").SetStderrtPipe(errch).SetStdoutPipe(outch).Run()
+    err := sh.NewSession().SetDir("/root").Command("ansible-playbook", "test.yml", "-v").SetStdoutPipe(outch).Run()
+    // err := sh.NewSession().SetDir("/root").Command("ansible-playbook", "test.yml", "-v").Run()
+    if err != nil {
+        log.Println("出错了", err)
+    }
+    wg.Wait()
+}
