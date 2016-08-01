@@ -24,6 +24,8 @@ Why I love golang so much, because the usage of golang is simple, but the power 
 	// output to json and xml easily
 	v := map[string] int {}
 	err = sh.Command("echo", `{"number": 1}`).UnmarshalJSON(&v)
+
+	CombinedPipe 模式输出会无序
 */
 package sh
 
@@ -43,19 +45,20 @@ import (
 type Dir string
 
 type Session struct {
-	inj          inject.Injector
-	alias        map[string][]string
-	cmds         []*exec.Cmd
-	dir          Dir
-	started      bool
-	Env          map[string]string
-	Stdin        io.Reader
-	Stdout       io.Writer
-	Stderr       io.Writer
-	StdoutPipe   chan string
-	StderrPipe   chan string
-	CombinedPipe chan string
-	wg           sync.WaitGroup
+	inj                    inject.Injector
+	alias                  map[string][]string
+	cmds                   []*exec.Cmd
+	dir                    Dir
+	started                bool
+	Env                    map[string]string
+	Stdin                  io.Reader
+	Stdout                 io.Writer
+	Stderr                 io.Writer
+	StdoutPipe             chan string
+	StderrPipe             chan string
+	CombinedPipe           chan string
+	CombinedRealTimeOutput chan string
+	wg                     sync.WaitGroup
 
 	ShowCMD bool // enable for debug
 	timeout time.Duration
@@ -73,6 +76,11 @@ func (s *Session) SetStderrtPipe(errch chan string) *Session {
 
 func (s *Session) SetCombinedPipe(compipe chan string) *Session {
 	s.CombinedPipe = compipe
+	return s
+}
+
+func (s *Session) SetCombinedRealTimeOutput(realtimech chan string) *Session {
+	s.CombinedRealTimeOutput = realtimech
 	return s
 }
 

@@ -71,10 +71,27 @@ func (s *Session) Start() (err error) {
 			_, _ = stdout, stderr
 
 			if s.CombinedPipe != nil {
-				cmd.Stdout = nil
-				cmd.Stderr = nil
-				stdout, err = cmd.StdoutPipe()
-				stderr, err = cmd.StderrPipe()
+				r, w, _ := os.Pipe()
+				s.wg.Add(1)
+				go func() {
+					for {
+						var sli = make([]byte, 1024)
+						n, err := r.Read(sli)
+						s.CombinedPipe <- string(sli[:n])
+						if err == io.EOF {
+							s.wg.Done()
+							break
+						}
+					}
+				}()
+				// 输出重定向到 os.Pipe，用以捕获输出
+				os.Stdout = w
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stdout
+				if err := cmd.Run(); err != nil {
+					log.Println(err)
+				}
+				w.Close()
 			} else {
 				if s.StdoutPipe != nil {
 					cmd.Stdout = nil //reset cmd.Stdout ,否则会报 exec: Stdout already set
@@ -87,40 +104,35 @@ func (s *Session) Start() (err error) {
 					stderr, err = cmd.StderrPipe()
 					// log.Println("stderr", err)
 				}
+				err = cmd.Start()
+				if err != nil {
+					if s.StdoutPipe != nil {
+						close(s.StdoutPipe)
+					}
+					if s.StdoutPipe != nil {
+						close(s.StderrPipe)
+					}
+					if s.CombinedPipe != nil {
+						close(s.CombinedPipe)
+					}
+					return
+				}
+				if s.StdoutPipe != nil {
+					s.wg.Add(1)
+					go s.WriteCh(stdout, s.StdoutPipe, true)
+				}
+				if s.StderrPipe != nil {
+					s.wg.Add(1)
+					go s.WriteCh(stderr, s.StderrPipe, true)
+				}
 			}
 			// cmd.Stderr = s.Stderr
-			err = cmd.Start()
-			if err != nil {
-				if s.StdoutPipe != nil {
-					close(s.StdoutPipe)
-				}
-				if s.StdoutPipe != nil {
-					close(s.StderrPipe)
-				}
-				if s.CombinedPipe != nil {
-					close(s.CombinedPipe)
-				}
-				return
-			}
-			if s.StdoutPipe != nil {
-				s.wg.Add(1)
-				go s.WriteCh(stdout, s.StdoutPipe, true)
-			}
-			if s.StderrPipe != nil {
-				s.wg.Add(1)
-				go s.WriteCh(stderr, s.StderrPipe, true)
-			}
 
-			if s.CombinedPipe != nil {
-				s.wg.Add(1)
-				go s.WriteCh(stdout, s.CombinedPipe, false)
-				s.wg.Add(1)
-				go s.WriteCh(stderr, s.CombinedPipe, false)
-			}
 			s.wg.Wait()
 			if s.CombinedPipe != nil {
 				close(s.CombinedPipe)
 			}
+
 		} else {
 			if s.StderrPipe != nil || s.StdoutPipe != nil {
 				return errors.New("Command output pipe does not support pipes!")
