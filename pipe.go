@@ -74,13 +74,28 @@ func (s *Session) Start() (err error) {
 				r, w, _ := os.Pipe()
 				s.wg.Add(1)
 				go func() {
+					// for {
+					// 	var sli = make([]byte, 1024)
+					// 	n, err := r.Read(sli)
+					// 	s.CombinedPipe <- string(sli[:n])
+					// 	if err == io.EOF {
+					// 		s.wg.Done()
+					// 		break
+					// 	}
+					// }
+
+					// 逐行输出
+					buf := bufio.NewReader(r)
 					for {
-						var sli = make([]byte, 1024)
-						n, err := r.Read(sli)
-						s.CombinedPipe <- string(sli[:n])
-						if err == io.EOF {
-							s.wg.Done()
-							break
+						line, err := buf.ReadString('\n')
+						line = strings.TrimSpace(line)
+						s.CombinedPipe <- line
+						if err != nil {
+							if err == io.EOF {
+								s.wg.Done()
+								break
+							}
+							return
 						}
 					}
 				}()
