@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -38,6 +40,8 @@ func (s *Session) UnmarshalXML(data interface{}) (err error) {
 
 // start command
 func (s *Session) Start() (err error) {
+	var wg sync.WaitGroup
+	s.wg = wg
 	s.started = true
 	var rd *io.PipeReader
 	var wr *io.PipeWriter
@@ -65,69 +69,60 @@ func (s *Session) Start() (err error) {
 			cmd.Stderr = s.Stderr
 			var stdout, stderr io.ReadCloser
 			_, _ = stdout, stderr
-			var wg sync.WaitGroup
 
-			if s.OutPipe {
-				cmd.Stdout = nil //reset cmd.Stdout ,否则会报 exec: Stdout already set
+			if s.CombinedPipe != nil {
+				cmd.Stdout = nil
+				cmd.Stderr = nil
 				stdout, err = cmd.StdoutPipe()
-				// log.Println("stdout", err)
-			}
-
-			if s.ErrPipe {
-				cmd.Stderr = nil //reset cmd.Stdout ,否则会报 exec: Stdout already set
 				stderr, err = cmd.StderrPipe()
-				// log.Println("stderr", err)
-			}
+			} else {
+				if s.StdoutPipe != nil {
+					cmd.Stdout = nil //reset cmd.Stdout ,否则会报 exec: Stdout already set
+					stdout, err = cmd.StdoutPipe()
+					// log.Println("stdout", err)
+				}
 
+				if s.StderrPipe != nil {
+					cmd.Stderr = nil //reset cmd.Stdout ,否则会报 exec: Stdout already set
+					stderr, err = cmd.StderrPipe()
+					// log.Println("stderr", err)
+				}
+			}
 			// cmd.Stderr = s.Stderr
 			err = cmd.Start()
 			if err != nil {
-				if s.OutPipe {
+				if s.StdoutPipe != nil {
 					close(s.StdoutPipe)
 				}
-				if s.ErrPipe {
+				if s.StdoutPipe != nil {
 					close(s.StderrPipe)
+				}
+				if s.CombinedPipe != nil {
+					close(s.CombinedPipe)
 				}
 				return
 			}
+			if s.StdoutPipe != nil {
+				s.wg.Add(1)
+				go s.WriteCh(stdout, s.StdoutPipe, true)
+			}
+			if s.StderrPipe != nil {
+				s.wg.Add(1)
+				go s.WriteCh(stderr, s.StderrPipe, true)
+			}
 
-			if s.OutPipe {
-				wg.Add(1)
-				readerout := bufio.NewReader(stdout)
-				go func() {
-					//实时循环读取输出流中的一行内容
-					for {
-						line, _, err := readerout.ReadLine()
-						// log.Println(line)
-						s.StdoutPipe <- string(line)
-						if err != nil || io.EOF == err {
-							close(s.StdoutPipe)
-							break
-						}
-					}
-					wg.Done()
-				}()
+			if s.CombinedPipe != nil {
+				s.wg.Add(1)
+				go s.WriteCh(stdout, s.CombinedPipe, false)
+				s.wg.Add(1)
+				go s.WriteCh(stderr, s.CombinedPipe, false)
 			}
-			if s.ErrPipe {
-				wg.Add(1)
-				readererr := bufio.NewReader(stderr)
-				go func() {
-					//实时循环读取输出流中的一行内容
-					for {
-						line, _, err := readererr.ReadLine()
-						// log.Println(line)
-						s.StderrPipe <- string(line)
-						if err != nil || io.EOF == err {
-							close(s.StderrPipe)
-							break
-						}
-					}
-					wg.Done()
-				}()
+			s.wg.Wait()
+			if s.CombinedPipe != nil {
+				close(s.CombinedPipe)
 			}
-			wg.Wait()
 		} else {
-			if s.ErrPipe || s.OutPipe {
+			if s.StderrPipe != nil || s.StdoutPipe != nil {
 				return errors.New("Command output pipe does not support pipes!")
 			}
 			err = cmd.Start()
@@ -140,6 +135,30 @@ func (s *Session) Start() (err error) {
 			return
 		}
 	}
+	return
+}
+
+func (s *Session) WriteCh(reader io.ReadCloser, writer chan string, chclose bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Println(" panic:\n", fmt.Sprint(r))
+		}
+		return
+	}()
+	//实时循环读取输出流中的一行内容
+	br := bufio.NewReader(reader)
+	for {
+		line, _, err := br.ReadLine()
+		// log.Println(line)
+		writer <- string(line)
+		if err != nil || io.EOF == err {
+			if chclose {
+				close(writer)
+			}
+			break
+		}
+	}
+	s.wg.Done()
 	return
 }
 
