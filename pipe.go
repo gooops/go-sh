@@ -103,9 +103,7 @@ func (s *Session) Start() (err error) {
 				os.Stdout = w
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stdout
-				if err := cmd.Run(); err != nil {
-					log.Println(err)
-				}
+				err = cmd.Run()
 				w.Close()
 			} else {
 				if s.StdoutPipe != nil {
@@ -156,10 +154,6 @@ func (s *Session) Start() (err error) {
 			if err != nil {
 				return
 			}
-		}
-		err = cmd.Start()
-		if err != nil {
-			return
 		}
 	}
 	return
